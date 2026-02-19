@@ -2,7 +2,7 @@
 <html lang="en">
 	<head>
 		<script src="coi-serviceworker.min.js"></script>
-		<base href="https://cdn.jsdelivr.net/gh/schoolaccountcolon3/not-games@latest/replicube">
+		<base href="https://cdn.jsdelivr.net/gh/schoolaccountcolon3/not-games@latest/replicube/">
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1.0">
 		<title>Replicube</title>
@@ -111,6 +111,109 @@ body {
 			<div id="status-notice"></div>
 		</div>
 
+		<script>
+(function () {
+	const splitFiles = {
+		'index.wasm': [
+			'index.wasm.part-00',
+			'index.wasm.part-01',
+			'index.wasm.part-02',
+		],
+		'index.pck': [
+			'index.pck.part-00',
+			'index.pck.part-01',
+			'index.pck.part-02',
+			'index.pck.part-03',
+		],
+	};
+
+	const originalFetch = window.fetch.bind(window);
+
+	function getUrl(input) {
+		if (typeof input === 'string') {
+			return input;
+		}
+		if (input && typeof input.url === 'string') {
+			return input.url;
+		}
+		return '';
+	}
+
+	function getFileName(url) {
+		const cleanUrl = url.split('?')[0].split('#')[0];
+		const lastSlash = cleanUrl.lastIndexOf('/');
+		return lastSlash >= 0 ? cleanUrl.slice(lastSlash + 1) : cleanUrl;
+	}
+
+	function getBaseUrl(url) {
+		const cleanUrl = url.split('?')[0].split('#')[0];
+		const lastSlash = cleanUrl.lastIndexOf('/');
+		return lastSlash >= 0 ? cleanUrl.slice(0, lastSlash + 1) : '';
+	}
+
+	function shouldHandle(url, init, input) {
+		if (!url) {
+			return '';
+		}
+		const method = (init && init.method) || (input && input.method) || 'GET';
+		if (method && method.toUpperCase() !== 'GET') {
+			return '';
+		}
+		const fileName = getFileName(url);
+		return splitFiles[fileName] ? fileName : '';
+	}
+
+	async function streamParts(baseUrl, parts, init, headers) {
+		return new Response(new ReadableStream({
+			async start(controller) {
+				try {
+					for (const part of parts) {
+						const partUrl = baseUrl + part;
+						const resp = await originalFetch(partUrl, init);
+						if (!resp.ok) {
+							throw new Error(`Failed loading file '${partUrl}'`);
+						}
+						if (!resp.body) {
+							const buf = new Uint8Array(await resp.arrayBuffer());
+							controller.enqueue(buf);
+							continue;
+						}
+						const reader = resp.body.getReader();
+						while (true) {
+							const result = await reader.read();
+							if (result.done) {
+								break;
+							}
+							if (result.value) {
+								controller.enqueue(result.value);
+							}
+						}
+					}
+					controller.close();
+				} catch (err) {
+					controller.error(err);
+				}
+			},
+		}), { status: 200, headers });
+	}
+
+	window.fetch = function (input, init) {
+		const url = getUrl(input);
+		const fileName = shouldHandle(url, init, input);
+		if (!fileName) {
+			return originalFetch(input, init);
+		}
+		const headers = new Headers();
+		if (fileName.endsWith('.wasm')) {
+			headers.set('content-type', 'application/wasm');
+		} else {
+			headers.set('content-type', 'application/octet-stream');
+		}
+		const baseUrl = getBaseUrl(url);
+		return streamParts(baseUrl, splitFiles[fileName], init, headers);
+	};
+}());
+		</script>
 		<script src="index.js"></script>
 		<script>
 const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":75069008,"index.wasm":43178456},"focusCanvas":true,"gdextensionLibs":[]};
@@ -219,4 +322,3 @@ const engine = new Engine(GODOT_CONFIG);
 		</script>
 	</body>
 </html>
-
